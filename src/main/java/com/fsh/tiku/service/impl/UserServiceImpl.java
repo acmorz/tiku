@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fsh.tiku.common.ErrorCode;
 import com.fsh.tiku.constant.CommonConstant;
+import com.fsh.tiku.constant.RedisConstant;
 import com.fsh.tiku.exception.BusinessException;
 import com.fsh.tiku.mapper.UserMapper;
 import com.fsh.tiku.model.dto.user.UserQueryRequest;
@@ -16,13 +17,18 @@ import com.fsh.tiku.model.vo.LoginUserVO;
 import com.fsh.tiku.model.vo.UserVO;
 import com.fsh.tiku.service.UserService;
 import com.fsh.tiku.utils.SqlUtils;
-import java.util.ArrayList;
-import java.util.List;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.*;
 import java.util.stream.Collectors;
+import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import me.chanjar.weixin.common.bean.WxOAuth2UserInfo;
 import org.apache.commons.lang3.StringUtils;
+import org.redisson.api.RBitSet;
+import org.redisson.api.RedissonClient;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
@@ -36,6 +42,8 @@ import org.springframework.util.DigestUtils;
 @Slf4j
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements UserService {
 
+    @Resource
+    private RedissonClient redissonClient;
     /**
      * 盐值，混淆密码
      */
@@ -149,6 +157,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     @Override
     public User getLoginUser(HttpServletRequest request) {
         // 先判断是否已登录
+        //获取当前请求关联的 HttpSession 对象,
         Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
         User currentUser = (User) userObj;
         if (currentUser == null || currentUser.getId() == null) {
@@ -267,5 +276,53 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         queryWrapper.orderBy(SqlUtils.validSortField(sortField), sortOrder.equals(CommonConstant.SORT_ORDER_ASC),
                 sortField);
         return queryWrapper;
+    }
+
+    /**
+     * 添加用户签到id
+     *
+     * @param userId
+     * @return
+     */
+    @Override
+    public boolean addUserSignIn(long userId) {
+        LocalDateTime now = LocalDateTime.now();
+        String key = RedisConstant.getUserSignInRedisKey(now.getYear(), userId);
+        RBitSet signInBitSet = redissonClient.getBitSet(key);
+        //一年中的偏移量 从1开始计算
+        int offer = now.getDayOfYear();
+        if(!signInBitSet.get(offer)){
+            signInBitSet.set(offer);
+        }
+        return true;
+    }
+
+    @Override
+    public List<Integer> getUserSignInRecord(long userId, Integer year) {
+        LocalDateTime now = LocalDateTime.now();
+
+        if(year == null)
+            year = now.getYear();
+
+        String key = RedisConstant.getUserSignInRedisKey(year, userId);
+        RBitSet signInBitSet = redissonClient.getBitSet(key);
+        // 加载 BitSet 到内存中，避免后续读取时发送多次请求
+        BitSet bitSet = signInBitSet.asBitSet();
+
+        List<Integer> record = new ArrayList<>();
+        int index = bitSet.nextSetBit(1);
+        while(index >= 1){
+            record.add(index);
+            index = bitSet.nextSetBit(index + 1);
+        }
+//        int totalDay = now.getDayOfYear(); //只遍历到今天
+//        for(int offer = 1; offer <= totalDay; offer ++ ){
+//            if(bitSet.get(offer)){
+//                LocalDate localDate = LocalDate.ofYearDay(year, offer);
+//                record.add(offer);
+//            }
+//        }
+
+        return record;
     }
 }

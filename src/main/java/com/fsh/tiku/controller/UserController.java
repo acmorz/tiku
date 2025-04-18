@@ -6,7 +6,9 @@ import com.fsh.tiku.common.BaseResponse;
 import com.fsh.tiku.common.DeleteRequest;
 import com.fsh.tiku.common.ErrorCode;
 import com.fsh.tiku.common.ResultUtils;
+import com.fsh.tiku.config.RedissonConfig;
 import com.fsh.tiku.config.WxOpenConfig;
+import com.fsh.tiku.constant.RedisConstant;
 import com.fsh.tiku.constant.UserConstant;
 import com.fsh.tiku.exception.BusinessException;
 import com.fsh.tiku.exception.ThrowUtils;
@@ -21,7 +23,10 @@ import com.fsh.tiku.model.vo.LoginUserVO;
 import com.fsh.tiku.model.vo.UserVO;
 import com.fsh.tiku.service.UserService;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -31,6 +36,9 @@ import me.chanjar.weixin.common.bean.WxOAuth2UserInfo;
 import me.chanjar.weixin.common.bean.oauth2.WxOAuth2AccessToken;
 import me.chanjar.weixin.mp.api.WxMpService;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.poi.ss.formula.functions.T;
+import org.redisson.api.RBitSet;
+import org.redisson.api.RedissonClient;
 import org.springframework.beans.BeanUtils;
 import org.springframework.util.DigestUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -57,6 +65,9 @@ public class UserController {
 
     @Resource
     private WxOpenConfig wxOpenConfig;
+
+    @Resource
+    private RedissonClient redissonClient;
 
     // region 登录相关
 
@@ -315,5 +326,43 @@ public class UserController {
         boolean result = userService.updateById(user);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(true);
+    }
+
+    /**
+     *
+     * 添加用户签到id
+     *
+     * @param request
+     * @return
+     */
+    @PostMapping("/add/sign_id")
+    public BaseResponse<Boolean> addUserSignIn(HttpServletRequest request) {
+        User user = userService.getLoginUser(request);
+
+        Long userId = user.getId();
+        ThrowUtils.throwIf(userId < 0, ErrorCode.PARAMS_ERROR);
+
+        return ResultUtils.success(userService.addUserSignIn(userId));
+    }
+
+    /**
+     * 查询用户某年的签到记录
+     * @param year
+     * @param request
+     * @return
+     */
+    @GetMapping("/get/sign_id")
+    public BaseResponse<List<Integer>> getUserSignIn(Integer year, HttpServletRequest request) {
+        User user = userService.getLoginUser(request);
+
+        Long userId = user.getId();
+        ThrowUtils.throwIf(userId < 0, ErrorCode.PARAMS_ERROR);
+        LocalDateTime now = LocalDateTime.now();
+        if(year == null){
+            year = now.getYear();
+        }
+        List<Integer> record = userService.getUserSignInRecord(userId, year);
+
+        return ResultUtils.success(record);
     }
 }
