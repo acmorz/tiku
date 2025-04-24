@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.fsh.tiku.model.dto.question.QuestionQueryRequest;
 import com.fsh.tiku.model.entity.Question;
+import com.fsh.tiku.model.entity.User;
 import com.fsh.tiku.model.vo.QuestionVO;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -73,4 +74,20 @@ public interface QuestionService extends IService<Question> {
      * @param questionIds
      */
     void batchDeleteQuestion(List<Long> questionIds);
+
+    /**
+     * AI自动生成题目
+     * @param questionType
+     * @param number
+     * @param user
+     * @return
+     */
+    boolean aiGenerateQuestion(String questionType, int number, User user);
+
+    /**
+     * AI自动生成题目对应题解
+     * @param questionTitle
+     * @return
+     */
+    String aiGenerateQuestionAnswer(String questionTitle);
 }

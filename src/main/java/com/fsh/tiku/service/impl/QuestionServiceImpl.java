@@ -1,14 +1,18 @@
 package com.fsh.tiku.service.impl;
 
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.util.ObjectUtil;
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.fsh.tiku.annotation.AuthCheck;
 import com.fsh.tiku.common.ErrorCode;
 import com.fsh.tiku.constant.CommonConstant;
 import com.fsh.tiku.exception.ThrowUtils;
+import com.fsh.tiku.manager.AiManager;
 import com.fsh.tiku.mapper.QuestionBankQuestionMapper;
 import com.fsh.tiku.mapper.QuestionMapper;
 import com.fsh.tiku.model.dto.question.QuestionEsDTO;
@@ -22,6 +26,7 @@ import com.fsh.tiku.service.QuestionBankQuestionService;
 import com.fsh.tiku.service.QuestionService;
 import com.fsh.tiku.service.UserService;
 import com.fsh.tiku.utils.SqlUtils;
+import com.volcengine.ark.runtime.service.ArkService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -57,6 +62,8 @@ import java.util.stream.Collectors;
 @Slf4j
 public class QuestionServiceImpl extends ServiceImpl<QuestionMapper, Question> implements QuestionService {
 
+    @Resource
+    private AiManager aiManager;
     @Resource
     private QuestionBankQuestionMapper questionBankQuestionMapper;
     @Resource
@@ -361,5 +368,73 @@ public class QuestionServiceImpl extends ServiceImpl<QuestionMapper, Question> i
                 questionBankQuestionService.remove(questionLambdaQueryWrapper);
             }
         }
+    }
+
+    @Override
+    public boolean aiGenerateQuestion(String questionType, int number, User user) {
+        ThrowUtils.throwIf(ObjectUtil.hasEmpty(questionType, number), ErrorCode.PARAMS_ERROR, "参数空缺");
+        // 1.定义系统Prompt
+        String systemPrompt = "你是专业程序员面试官，你要帮我生成 {数量} 道 {方向} 热门常问的面试题，要求输出格式如下：\n" +
+                "\n" +
+                "1. 什么是 Java 中的反射？\n" +
+                "2. Java 8 中的 Stream API 有什么作用？\n" +
+                "3. xxxxxx\n" +
+                "\n" +
+                "请不要输出：多余的内容、开头，结尾。只输出题目。\n" +
+                "\n" +
+                "我会给你要生成的题目{数量}、以及题目{方向}\n";
+        // 2.拼接用于Prompt
+        String userPrompt = "题目数量" + number + "题目方向" + questionType;
+        // 3.调用AI接口返回题目列表
+        String result = aiManager.doChat(systemPrompt, userPrompt);
+        // 4.对题目列表进行后处理
+        List<String> lines = Arrays.asList(result.split("\n"));
+
+        List<String> answer = lines.stream()
+                .map(line -> StrUtil.removePrefix(line, StrUtil.subBefore(line, " ", false)))
+                .map(line -> line.replace("`", ""))
+                .collect(Collectors.toList());
+
+        // 5.将题目列表放入数据库中
+        Long userId = user.getId();
+        String tag = "[\"AI生成\",\"" + questionType + "\"]";
+        List<Question> questionsList = answer.stream()
+                .map(title -> {
+                    Question question = new Question();
+                    question.setTitle(title);
+                    question.setAnswer(this.aiGenerateQuestionAnswer(title));
+                    question.setUserId(userId);
+                    question.setTags(tag);
+                    return question;
+                })
+                .collect(Collectors.toList());
+
+        boolean insertFlag = this.saveBatch(questionsList);
+        ThrowUtils.throwIf(insertFlag == false, ErrorCode.OPERATION_ERROR, "批量插入ai生成的题目失败");
+
+        return true;
+    }
+
+    @Override
+    public String aiGenerateQuestionAnswer(String questionTitle) {
+        ThrowUtils.throwIf(ObjectUtil.hasEmpty(questionTitle), ErrorCode.PARAMS_ERROR, "参数空缺");
+        // 1.定义系统Prompt
+        String systemPrompt = "你是专业的程序员面试官，我给你一道面试题，帮我生成详细题解。要求如下：\n" +
+                "\n" +
+                "1. 题解的语句要自然流畅\n" +
+                "2. 题解先给出总结性的回答，再详细解释\n" +
+                "3. 要使用 Markdown 语法输出\n" +
+                "\n" +
+                "请不要输出：多余的内容、开头，结尾。只输出题目。\n" +
+                "\n" +
+                "接下来我会给你要生成的面试题目\n";
+        // 2.拼接用于Prompt
+        String userPrompt = "题目标题：" + questionTitle;
+        // 3.调用AI接口返回题目列表
+        String answer = aiManager.doChat(systemPrompt, userPrompt);
+
+        ThrowUtils.throwIf(StringUtils.isEmpty(answer), ErrorCode.OPERATION_ERROR, "ai生成答案为空");
+
+        return answer;
     }
 }

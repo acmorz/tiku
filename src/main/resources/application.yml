@@ -179,3 +179,5 @@ knife4j:
         api-rule: package
         api-rule-resources:
           - com.fsh.tiku.controller
+ai:
+  apiKey: d2f2dfce-61fc-485a-a35f-5394fb2e93f6

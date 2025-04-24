@@ -273,5 +273,25 @@ public class QuestionController {
         return ResultUtils.success(true);
     }
 
+
+    /**
+     * Ai自动生成题目
+     *
+     * @return
+     */
+    @PostMapping("/add/ai")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> aiGenerateQuestion(@RequestBody QuestionAIGenerateRequest questionAIGenerateRequest, HttpServletRequest request){
+        ThrowUtils.throwIf(questionAIGenerateRequest == null, ErrorCode.PARAMS_ERROR);
+
+        String questionType = questionAIGenerateRequest.getQuestionType();
+        int number = questionAIGenerateRequest.getNumber();
+        User user = userService.getLoginUser(request);
+
+        questionService.aiGenerateQuestion(questionType, number, user);
+
+        return ResultUtils.success(true);
+    }
+
     // endregion
 }
