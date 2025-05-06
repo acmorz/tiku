@@ -1,15 +1,22 @@
 package com.fsh.tiku.service.impl;
 
 import cn.hutool.core.collection.CollUtil;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fsh.tiku.common.ErrorCode;
 import com.fsh.tiku.constant.CommonConstant;
 import com.fsh.tiku.exception.ThrowUtils;
 import com.fsh.tiku.mapper.QuestionBankMapper;
+import com.fsh.tiku.model.dto.question.QuestionEsDTO;
+import com.fsh.tiku.model.dto.question.QuestionQueryRequest;
 import com.fsh.tiku.model.dto.questionBank.QuestionBankQueryRequest;
+import com.fsh.tiku.model.entity.Question;
 import com.fsh.tiku.model.entity.QuestionBank;
+import com.fsh.tiku.model.entity.QuestionBankQuestion;
 import com.fsh.tiku.model.entity.User;
 import com.fsh.tiku.model.vo.QuestionBankVO;
 import com.fsh.tiku.model.vo.UserVO;
@@ -20,14 +27,22 @@ import com.fsh.tiku.utils.SqlUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.elasticsearch.index.query.BoolQueryBuilder;
+import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.search.sort.SortBuilder;
+import org.elasticsearch.search.sort.SortBuilders;
+import org.elasticsearch.search.sort.SortOrder;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.elasticsearch.core.SearchHit;
+import org.springframework.data.elasticsearch.core.SearchHits;
+import org.springframework.data.elasticsearch.core.query.NativeSearchQuery;
+import org.springframework.data.elasticsearch.core.query.NativeSearchQueryBuilder;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -42,6 +57,8 @@ public class QuestionBankServiceImpl extends ServiceImpl<QuestionBankMapper, Que
 
     @Resource
     private UserService userService;
+    @Autowired
+    private QuestionBankMapper questionBankMapper;
 
 
     /**
@@ -170,5 +187,25 @@ public class QuestionBankServiceImpl extends ServiceImpl<QuestionBankMapper, Que
         return questionBankVOPage;
     }
 
+
+    /**
+     * ES查询题库是否存在
+     * @param questionBank
+     * @return
+     */
+    @Override
+    public Long searchByTitle(QuestionBank questionBank) {
+        String title = questionBank.getTitle();
+
+        List<Long> ids = questionBankMapper.searchByTitle(title);
+        Long id;
+        if(ids == null || ids.isEmpty()) {
+            this.save(questionBank);
+            id = questionBank.getId();
+        }
+        else id = ids.get(0);
+
+        return id;
+    }
 
 }

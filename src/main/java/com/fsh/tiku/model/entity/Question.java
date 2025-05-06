@@ -16,7 +16,7 @@ public class Question implements Serializable {
     /**
      * id 生成主键的策略
      */
-    @TableId(type = IdType.ASSIGN_ID)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     /**

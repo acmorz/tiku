@@ -51,5 +51,10 @@ public interface QuestionBankService extends IService<QuestionBank> {
      */
     Page<QuestionBankVO> getQuestionBankVOPage(Page<QuestionBank> questionBankPage, HttpServletRequest request);
 
-
+    /**
+     * ES查询题库是否存在
+     * @param questionBank
+     * @return
+     */
+    Long searchByTitle(QuestionBank questionBank);
 }

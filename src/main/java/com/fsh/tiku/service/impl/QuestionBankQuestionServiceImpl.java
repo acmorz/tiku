@@ -63,7 +63,6 @@ public class QuestionBankQuestionServiceImpl extends ServiceImpl<QuestionBankQue
     @Lazy
     private QuestionService questionService;
 
-
     @Resource
     private QuestionBankService questionBankService;
     /**
@@ -201,7 +200,6 @@ public class QuestionBankQuestionServiceImpl extends ServiceImpl<QuestionBankQue
      * @param user
      */
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void batchAddQuestionToBank(List<Long> questionIds, Long questionBankId, User user) {
         ThrowUtils.throwIf(questionIds == null, ErrorCode.PARAMS_ERROR, "题目列表为空");
         ThrowUtils.throwIf(questionBankId <= 0, ErrorCode.PARAMS_ERROR, "题库id错误");
@@ -231,7 +229,7 @@ public class QuestionBankQuestionServiceImpl extends ServiceImpl<QuestionBankQue
         List<Long> finalQuestionIds = validQuestionIdsList.stream()
                 .filter(item -> !existQuestionList.contains(item))
                 .collect(Collectors.toList());
-        ThrowUtils.throwIf(finalQuestionIds.isEmpty(), ErrorCode.NOT_FOUND_ERROR, "题目已经添加到题库中");
+        ThrowUtils.throwIf(finalQuestionIds.isEmpty(), ErrorCode.NOT_FOUND_ERROR, "所有题目已经添加到题库中");
 
         // 自定义线程池
         ThreadPoolExecutor customExecutor = new ThreadPoolExecutor(
@@ -246,7 +244,7 @@ public class QuestionBankQuestionServiceImpl extends ServiceImpl<QuestionBankQue
         // 用于保存所有批次的任务 CompletableFuture
         List<CompletableFuture<Void>> futures = new ArrayList<>();
 
-        int batchSize = 1000;
+        int batchSize = 10;
         for(int i = 0; i < finalQuestionIds.size(); i += batchSize){
             List<Long> subList = finalQuestionIds.subList(i, Math.min(i + batchSize, finalQuestionIds.size()));
             List<QuestionBankQuestion> questionBankQuestionList = subList.stream()
@@ -280,6 +278,7 @@ public class QuestionBankQuestionServiceImpl extends ServiceImpl<QuestionBankQue
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void batchAddQuestionToBankInner(List<QuestionBankQuestion> questionBankQuestionList){
+        log.info("项目线程" + Thread.currentThread().getName());
         for (QuestionBankQuestion questionBankQuestion : questionBankQuestionList) {
 //                在关联表中插入对应的题目和题库
             Long questionBankId = questionBankQuestion.getQuestionBankId();

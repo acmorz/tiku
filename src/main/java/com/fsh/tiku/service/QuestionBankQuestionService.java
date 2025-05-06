@@ -7,6 +7,7 @@ import com.fsh.tiku.model.dto.questionBankQuestion.QuestionBankQuestionQueryRequ
 import com.fsh.tiku.model.entity.QuestionBankQuestion;
 import com.fsh.tiku.model.entity.User;
 import com.fsh.tiku.model.vo.QuestionBankQuestionVO;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.servlet.http.HttpServletRequest;
 import java.util.List;
@@ -61,7 +62,7 @@ public interface QuestionBankQuestionService extends IService<QuestionBankQuesti
      */
     void batchAddQuestionToBank(List<Long> questionIds, Long questionBankId, User user);
 
-
+    @Transactional(rollbackFor = Exception.class)
     void batchAddQuestionToBankInner(List<QuestionBankQuestion> questionBankQuestionList);
 
     /**

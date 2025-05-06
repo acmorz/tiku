@@ -18,11 +18,13 @@ import com.fsh.tiku.mapper.QuestionMapper;
 import com.fsh.tiku.model.dto.question.QuestionEsDTO;
 import com.fsh.tiku.model.dto.question.QuestionQueryRequest;
 import com.fsh.tiku.model.entity.Question;
+import com.fsh.tiku.model.entity.QuestionBank;
 import com.fsh.tiku.model.entity.QuestionBankQuestion;
 import com.fsh.tiku.model.entity.User;
 import com.fsh.tiku.model.vo.QuestionVO;
 import com.fsh.tiku.model.vo.UserVO;
 import com.fsh.tiku.service.QuestionBankQuestionService;
+import com.fsh.tiku.service.QuestionBankService;
 import com.fsh.tiku.service.QuestionService;
 import com.fsh.tiku.service.UserService;
 import com.fsh.tiku.utils.SqlUtils;
@@ -50,6 +52,10 @@ import org.springframework.transaction.annotation.Transactional;
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -72,6 +78,8 @@ public class QuestionServiceImpl extends ServiceImpl<QuestionMapper, Question> i
     private ElasticsearchRestTemplate elasticsearchRestTemplate;
     @Autowired
     private QuestionBankQuestionService questionBankQuestionService;
+    @Resource
+    private QuestionBankService questionBankService;
 
 
     /**
@@ -386,7 +394,14 @@ public class QuestionServiceImpl extends ServiceImpl<QuestionMapper, Question> i
         // 2.拼接用于Prompt
         String userPrompt = "题目数量" + number + "题目方向" + questionType;
         // 3.调用AI接口返回题目列表
-        String result = aiManager.doChat(systemPrompt, userPrompt);
+        long startTime = System.currentTimeMillis(); // 开始时间戳
+        String result;
+        try {
+            result = aiManager.doChat(systemPrompt, userPrompt);
+        } finally {
+            long cost = System.currentTimeMillis() - startTime; // 计算耗时
+            log.info("AI接口调用耗时: {}ms", cost);
+        }
         // 4.对题目列表进行后处理
         List<String> lines = Arrays.asList(result.split("\n"));
 
@@ -395,27 +410,71 @@ public class QuestionServiceImpl extends ServiceImpl<QuestionMapper, Question> i
                 .map(line -> line.replace("`", ""))
                 .collect(Collectors.toList());
 
+        // 自定义线程池
+        ThreadPoolExecutor customExecutor = new ThreadPoolExecutor(
+                30,             // 核心线程数 同时处理批数
+                50,                        // 最大线程数
+                60L,                       // 线程空闲存活时间
+                TimeUnit.SECONDS,           // 存活时间单位
+                new LinkedBlockingQueue<>(10000),  // 阻塞队列容量
+                new ThreadPoolExecutor.CallerRunsPolicy() // 拒绝策略：由调用线程处理任务，把异步变成同步
+        );
+
         // 5.将题目列表放入数据库中
         Long userId = user.getId();
+
+        //判断题库表中是否存在该题目
+        QuestionBank questionBank = new QuestionBank();
         String tag = "[\"AI生成\",\"" + questionType + "\"]";
-        List<Question> questionsList = answer.stream()
-                .map(title -> {
-                    Question question = new Question();
-                    question.setTitle(title);
-                    question.setAnswer(this.aiGenerateQuestionAnswer(title));
-                    question.setUserId(userId);
-                    question.setTags(tag);
-                    return question;
-                })
-                .collect(Collectors.toList());
+        //检测questionBank表中是否有该题库
+        questionBank.setUserId(userId);
+        questionBank.setTitle(questionType);
+        //获取题库id
+        Long questionBankId = questionBankService.searchByTitle(questionBank);
 
-        boolean insertFlag = this.saveBatch(questionsList);
-        ThrowUtils.throwIf(insertFlag == false, ErrorCode.OPERATION_ERROR, "批量插入ai生成的题目失败");
+        List<Question> questionsList = new ArrayList<>();
+        List<Long> questionsId = new ArrayList<>();
+        // 用于保存所有批次的任务 CompletableFuture
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
 
+        for(int i = 0; i < answer.size(); i ++ ){
+            String title = answer.get(i);
+
+            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                Question question = new Question();
+                question.setTitle(title);
+                question.setUserId(userId);
+                question.setTags(tag);
+                question.setAnswer(this.aiGenerateQuestionAnswer(title));
+                questionsList.add(question);
+                log.info("当前线程名：" + Thread.currentThread().getName());
+                this.save(question);
+                //插入题目到题库中
+                Long questionId = question.getId();
+                questionsId.add(questionId);
+//                QuestionBankQuestion questionBankQuestion = new QuestionBankQuestion();
+//                questionBankQuestion.setQuestionBankId(questionBankId);
+//                questionBankQuestion.setQuestionId(questionId);
+//                questionBankQuestion.setUserId(userId);
+//                questionBankQuestionService.save(questionBankQuestion);
+            }, customExecutor).exceptionally(ex -> {
+                log.error("批处理执行ai生成答案失败", ex);
+                return null;
+            });
+
+            futures.add(future);
+        }
+
+        // 等待所有批次操作完成
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+//        this.saveBatch(questionsList);
+        questionBankQuestionService.batchAddQuestionToBank(questionsId, questionBankId, user);
+        customExecutor.shutdown();
         return true;
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public String aiGenerateQuestionAnswer(String questionTitle) {
         ThrowUtils.throwIf(ObjectUtil.hasEmpty(questionTitle), ErrorCode.PARAMS_ERROR, "参数空缺");
         // 1.定义系统Prompt
@@ -425,7 +484,7 @@ public class QuestionServiceImpl extends ServiceImpl<QuestionMapper, Question> i
                 "2. 题解先给出总结性的回答，再详细解释\n" +
                 "3. 要使用 Markdown 语法输出\n" +
                 "\n" +
-                "请不要输出：多余的内容、开头，结尾。只输出题目。\n" +
+                "请不要输出：多余的内容、开头，结尾。只输出题目答案。\n" +
                 "\n" +
                 "接下来我会给你要生成的面试题目\n";
         // 2.拼接用于Prompt
