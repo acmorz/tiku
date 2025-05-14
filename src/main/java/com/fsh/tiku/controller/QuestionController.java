@@ -1,6 +1,7 @@
 package com.fsh.tiku.controller;
 
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -23,14 +24,19 @@ import com.fsh.tiku.model.vo.QuestionVO;
 import com.fsh.tiku.service.QuestionBankQuestionService;
 import com.fsh.tiku.service.QuestionService;
 import com.fsh.tiku.service.UserService;
+import com.jd.platform.hotkey.client.callback.JdHotKeyStore;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.rabbit.connection.CorrelationData;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.BeanUtils;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import java.sql.Wrapper;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -52,6 +58,12 @@ public class QuestionController {
 
     @Resource
     private UserService userService;
+
+    @Resource
+    private RedisTemplate redisTemplate;
+
+    @Resource
+    private RabbitTemplate rabbitTemplate;
 
 
 
@@ -134,8 +146,49 @@ public class QuestionController {
         // 操作数据库
         boolean result = questionService.updateById(question);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+
+        // 删除缓存中对应的题目
+        // 自动缓存热门题库
+        String key = "detail_" + id;
+        try{
+            redisTemplate.delete(key);
+        } catch (Exception e){
+            log.error("删除缓存失败 Key: {}，错误信息: {}", key, e.getMessage());
+        }
+
         return ResultUtils.success(true);
     }
+
+//    /**
+//     * 根据 题目 id 获取题目（封装类）
+//     *
+//     * @param id
+//     * @return
+//     */
+//    @GetMapping("/get/vo")
+//    public BaseResponse<QuestionVO> getQuestionVOById(long id, HttpServletRequest request) {
+//        ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
+//
+//        // 自动缓存热门题库
+//        String key = "detail_" + id;
+//        if(JdHotKeyStore.isHotKey(key)){
+//            Object cachedQuestionVO = JdHotKeyStore.get(key);
+//            if(cachedQuestionVO != null){
+//                return ResultUtils.success((QuestionVO) cachedQuestionVO);
+//            }
+//        }
+//
+//        // 查询数据库
+//        Question question = questionService.getById(id);
+//        ThrowUtils.throwIf(question == null, ErrorCode.NOT_FOUND_ERROR);
+//        // 获取封装类
+//        QuestionVO questionVO = questionService.getQuestionVO(question, request);
+//
+//        //设置本地缓存
+//        JdHotKeyStore.smartSet(key, questionVO);
+//
+//        return ResultUtils.success(questionVO);
+//    }
 
     /**
      * 根据 题目 id 获取题目（封装类）
@@ -146,11 +199,34 @@ public class QuestionController {
     @GetMapping("/get/vo")
     public BaseResponse<QuestionVO> getQuestionVOById(long id, HttpServletRequest request) {
         ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
-        // 查询数据库
-        Question question = questionService.getById(id);
-        ThrowUtils.throwIf(question == null, ErrorCode.NOT_FOUND_ERROR);
-        // 获取封装类
-        return ResultUtils.success(questionService.getQuestionVO(question, request));
+
+        // 自动缓存热门题库
+        String key = "detail_" + id;
+        QuestionVO valueQuestionVO = (QuestionVO)redisTemplate.opsForValue().get(key);
+
+        if(ObjectUtil.isEmpty(valueQuestionVO)){
+            synchronized (this) {
+                // 再去判断一次缓存中是否有数据
+                QuestionVO secondValuequestionVO = (QuestionVO)redisTemplate.opsForValue().get(key);
+
+                if(ObjectUtil.isEmpty(secondValuequestionVO)){
+                    log.info("从数据库中查询数据");
+                    // 1.查询数据库
+                    Question question = questionService.getById(id);
+                    ThrowUtils.throwIf(question == null, ErrorCode.NOT_FOUND_ERROR);
+                    // 获取封装类
+                    QuestionVO questionVO = questionService.getQuestionVO(question, request);
+                    // 2.设置本地缓存
+                    redisTemplate.opsForValue().set(key, questionVO);
+                    return ResultUtils.success(questionVO);
+                }
+
+                return ResultUtils.success(secondValuequestionVO);
+            }
+        }
+
+        log.info("从缓存中获取数据成功");
+        return ResultUtils.success(valueQuestionVO);
     }
 
     /**
@@ -284,11 +360,16 @@ public class QuestionController {
     public BaseResponse<Boolean> aiGenerateQuestion(@RequestBody QuestionAIGenerateRequest questionAIGenerateRequest, HttpServletRequest request){
         ThrowUtils.throwIf(questionAIGenerateRequest == null, ErrorCode.PARAMS_ERROR);
 
-        String questionType = questionAIGenerateRequest.getQuestionType();
+
         int number = questionAIGenerateRequest.getNumber();
         User user = userService.getLoginUser(request);
+        questionAIGenerateRequest.setUserId(user.getId());
 
-        questionService.aiGenerateQuestion(questionType, number, user);
+        ThrowUtils.throwIf(number <= 0 || number > 30, ErrorCode.PARAMS_ERROR, "请求题目数量不合理");
+
+
+        //往RabbitMQ中发送消息
+        rabbitTemplate.convertAndSend("questionbank_exchange", "questionbank", questionAIGenerateRequest, new CorrelationData(UUID.randomUUID().toString()));
 
         return ResultUtils.success(true);
     }

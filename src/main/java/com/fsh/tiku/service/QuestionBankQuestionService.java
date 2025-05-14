@@ -58,9 +58,9 @@ public interface QuestionBankQuestionService extends IService<QuestionBankQuesti
      * 批量向题库中插入题目
      * @param questionIds
      * @param questionBankId
-     * @param user
+     * @param userId
      */
-    void batchAddQuestionToBank(List<Long> questionIds, Long questionBankId, User user);
+    void batchAddQuestionToBank(List<Long> questionIds, Long questionBankId, Long userId);
 
     @Transactional(rollbackFor = Exception.class)
     void batchAddQuestionToBankInner(List<QuestionBankQuestion> questionBankQuestionList);

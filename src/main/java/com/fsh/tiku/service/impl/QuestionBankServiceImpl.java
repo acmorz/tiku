@@ -189,7 +189,7 @@ public class QuestionBankServiceImpl extends ServiceImpl<QuestionBankMapper, Que
 
 
     /**
-     * ES查询题库是否存在
+     * 查询题库是否存在
      * @param questionBank
      * @return
      */

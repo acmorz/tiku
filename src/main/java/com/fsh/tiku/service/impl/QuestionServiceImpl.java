@@ -15,6 +15,7 @@ import com.fsh.tiku.exception.ThrowUtils;
 import com.fsh.tiku.manager.AiManager;
 import com.fsh.tiku.mapper.QuestionBankQuestionMapper;
 import com.fsh.tiku.mapper.QuestionMapper;
+import com.fsh.tiku.model.dto.question.QuestionAIGenerateRequest;
 import com.fsh.tiku.model.dto.question.QuestionEsDTO;
 import com.fsh.tiku.model.dto.question.QuestionQueryRequest;
 import com.fsh.tiku.model.entity.Question;
@@ -28,6 +29,9 @@ import com.fsh.tiku.service.QuestionBankService;
 import com.fsh.tiku.service.QuestionService;
 import com.fsh.tiku.service.UserService;
 import com.fsh.tiku.utils.SqlUtils;
+import com.rabbitmq.client.AMQP;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.impl.AMQImpl;
 import com.volcengine.ark.runtime.service.ArkService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ObjectUtils;
@@ -37,6 +41,9 @@ import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.search.sort.SortBuilder;
 import org.elasticsearch.search.sort.SortBuilders;
 import org.elasticsearch.search.sort.SortOrder;
+import org.springframework.amqp.core.Message;
+import org.springframework.amqp.rabbit.annotation.EnableRabbit;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.PageRequest;
@@ -379,7 +386,7 @@ public class QuestionServiceImpl extends ServiceImpl<QuestionMapper, Question> i
     }
 
     @Override
-    public boolean aiGenerateQuestion(String questionType, int number, User user) {
+    public boolean aiGenerateQuestion(String questionType, int number, Long userId) {
         ThrowUtils.throwIf(ObjectUtil.hasEmpty(questionType, number), ErrorCode.PARAMS_ERROR, "参数空缺");
         // 1.定义系统Prompt
         String systemPrompt = "你是专业程序员面试官，你要帮我生成 {数量} 道 {方向} 热门常问的面试题，要求输出格式如下：\n" +
@@ -420,8 +427,6 @@ public class QuestionServiceImpl extends ServiceImpl<QuestionMapper, Question> i
                 new ThreadPoolExecutor.CallerRunsPolicy() // 拒绝策略：由调用线程处理任务，把异步变成同步
         );
 
-        // 5.将题目列表放入数据库中
-        Long userId = user.getId();
 
         //判断题库表中是否存在该题目
         QuestionBank questionBank = new QuestionBank();
@@ -468,9 +473,40 @@ public class QuestionServiceImpl extends ServiceImpl<QuestionMapper, Question> i
         // 等待所有批次操作完成
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 //        this.saveBatch(questionsList);
-        questionBankQuestionService.batchAddQuestionToBank(questionsId, questionBankId, user);
+        questionBankQuestionService.batchAddQuestionToBank(questionsId, questionBankId, userId);
         customExecutor.shutdown();
         return true;
+    }
+
+    /**
+     * 从消息队列中取出消息
+     * @param message
+     * @param questionAIGenerateRequest
+     * @param channel
+     */
+    @Override
+    @RabbitListener(queues = {"questionbank_queue"})
+    public void aiGenerateQuestionFromRabbitMQ(Message message, QuestionAIGenerateRequest questionAIGenerateRequest, Channel channel) {
+        String questionType = questionAIGenerateRequest.getQuestionType();
+        int number = questionAIGenerateRequest.getNumber();
+        Long userId = questionAIGenerateRequest.getUserId();
+
+        log.info("从RabbitMQ中获取消息，进行AI生成对应题目");
+        aiGenerateQuestion(questionType, number, userId);
+
+        //deliveryTag是channel中按顺序自增的
+        long deliveryTag = message.getMessageProperties().getDeliveryTag();
+        try {
+            /**
+             *  deliveryTag - 来自接收到的 AMQP.Basic.GetOk 或 AMQP.Basic.Deliver 的标签,deliveryTag是channel中按顺序自增的
+             *  true 表示确认从第一个消息到包括所提供的 deliveryTag 在内的所有消息；false 表示仅确认所提供的 deliveryTag 对应的消息。
+             */
+            channel.basicAck(deliveryTag, false);
+            //第二个true标识重新放回队列，false标识不放回队列
+            //channel.basicNack(deliveryTag, false, true);
+        }catch(Exception e){
+            log.error("网络中断，消息确认失败", e);
+        }
     }
 
     @Override

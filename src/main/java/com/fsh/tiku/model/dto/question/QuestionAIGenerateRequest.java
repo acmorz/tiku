@@ -1,5 +1,6 @@
 package com.fsh.tiku.model.dto.question;
 
+import com.fsh.tiku.model.entity.User;
 import lombok.Data;
 import org.springframework.format.annotation.DateTimeFormat;
 
@@ -17,6 +18,11 @@ public class QuestionAIGenerateRequest implements Serializable {
      * 题目数量
      */
     private int number;
+
+    /**
+     * 用户ID
+     */
+    private Long userId;
 
     private static final long serialVersionUID = 1L;
 }

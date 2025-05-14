@@ -3,10 +3,13 @@ package com.fsh.tiku.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.fsh.tiku.model.dto.question.QuestionAIGenerateRequest;
 import com.fsh.tiku.model.dto.question.QuestionQueryRequest;
 import com.fsh.tiku.model.entity.Question;
 import com.fsh.tiku.model.entity.User;
 import com.fsh.tiku.model.vo.QuestionVO;
+import com.rabbitmq.client.Channel;
+import org.springframework.amqp.core.Message;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.servlet.http.HttpServletRequest;
@@ -79,10 +82,17 @@ public interface QuestionService extends IService<Question> {
      * AI自动生成题目
      * @param questionType
      * @param number
-     * @param user
+     * @param userId
      * @return
      */
-    boolean aiGenerateQuestion(String questionType, int number, User user);
+    boolean aiGenerateQuestion(String questionType, int number, Long userId);
+
+    /**
+     * AI从RabbitMQ中获取消息
+     * @param questionAIGenerateRequest
+     * @return
+     */
+    void aiGenerateQuestionFromRabbitMQ(Message message, QuestionAIGenerateRequest questionAIGenerateRequest, Channel channel);
 
     /**
      * AI自动生成题目对应题解

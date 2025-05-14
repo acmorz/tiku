@@ -200,10 +200,10 @@ public class QuestionBankQuestionServiceImpl extends ServiceImpl<QuestionBankQue
      * @param user
      */
     @Override
-    public void batchAddQuestionToBank(List<Long> questionIds, Long questionBankId, User user) {
+    public void batchAddQuestionToBank(List<Long> questionIds, Long questionBankId, Long userId) {
         ThrowUtils.throwIf(questionIds == null, ErrorCode.PARAMS_ERROR, "题目列表为空");
         ThrowUtils.throwIf(questionBankId <= 0, ErrorCode.PARAMS_ERROR, "题库id错误");
-        ThrowUtils.throwIf(user == null, ErrorCode.NOT_LOGIN_ERROR);
+        ThrowUtils.throwIf(userId < 0, ErrorCode.NOT_LOGIN_ERROR);
 
         //判断题目id是否存在
         List<Question> questions = questionService.listByIds(questionIds);
@@ -251,7 +251,7 @@ public class QuestionBankQuestionServiceImpl extends ServiceImpl<QuestionBankQue
                     .map(questionId->{
                         QuestionBankQuestion questionBankQuestion = new QuestionBankQuestion();
                         questionBankQuestion.setQuestionId(questionId);
-                        questionBankQuestion.setUserId(user.getId());
+                        questionBankQuestion.setUserId(userId);
                         questionBankQuestion.setQuestionBankId(questionBankId);
                         return questionBankQuestion;
                     })

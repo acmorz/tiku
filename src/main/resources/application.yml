@@ -94,6 +94,20 @@ spring:
         allow: 127.0.0.1 # 允许访问的地址，如果allow没有配置或者为空，则允许所有访问
         deny: # 拒绝访问的地址，deny优先于allow，如果在deny列表中，就算在allow列表中，也会被拒绝
 
+  # 分布式消息队列
+  rabbitmq:
+    host: localhost
+    post: 5672
+    password: guest
+    username: guest
+    publisher-confirm-type: simple # 开启发送端确认 默认为none
+    publisher-returns: true  # 开启发送端消息抵达队列的确认
+    template:
+      mandatory: true # 只要抵达队列，以异步发送优先回调我们这个returnconfirm
+    listener:
+      simple:
+        acknowledge-mode: manual  #默认自动回复 auto manual 手动确认消息
+
   # Redis 配置
   # todo 需替换配置，然后取消注释
   redis:
@@ -131,6 +145,8 @@ mybatis-plus:
       logic-delete-field: isDelete # 全局逻辑删除的实体字段名
       logic-delete-value: 1 # 逻辑已删除值（默认为 1）
       logic-not-delete-value: 0 # 逻辑未删除值（默认为 0）
+
+
 
 # 热 key 探测
 hotkey:
